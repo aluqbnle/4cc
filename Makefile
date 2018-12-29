@@ -1,7 +1,7 @@
 4cc: 4cc.c
 
 test: 4cc
-        ./test.sh
+	./test.sh
 
 clean:
-        rm -f 4cc *.o *~ tmp*
+	rm -f 4cc *.o *~ tmp*
