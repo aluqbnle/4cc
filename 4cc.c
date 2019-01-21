@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+
 // Tokenizer
 
 enum {
@@ -70,9 +71,13 @@ typedef struct Node {
   struct Node *rhs; // right-hand side
   int val;          // Number literal
 } Node;
+Node *mul();
+Node *term();
+void error(char *fmt, ...);
 
-Node *new_node(int op, Node *lhs, Node *rhs) {
-  Node *node = malloc(sizeof(Node));
+Node *new_node(int op, Node *lhs, Node *rhs)
+{
+	Node *node = malloc(sizeof(Node));
   node->ty = op;
   node->lhs = lhs;
   node->rhs = rhs;
@@ -85,6 +90,51 @@ Node *new_node_num(int val) {
   node->val = val;
   return node;
 }
+
+int consume(int ty){
+	if(tokens[pos].ty != ty)
+		return 0;
+	pos++;
+	return 1;
+}
+
+Node *add(){
+	Node *node=mul();
+	for(;;){
+		if(consume('+'))
+			node = new_node('+',node,mul());
+		else if(consume('-'))
+			node=new_node('-',node,mul());
+		else
+		return node;
+	}
+}
+
+Node *mul(){
+	Node *node =term();
+
+	for(;;){
+		if(consume('*'))
+			node = new_node('*',node,term());
+		else if(consume('/'))
+			node =new_node('/',node,term());
+		else
+			return node;
+	}
+}
+Node *term(){
+	if(consume('(')){
+		Node *node =add();
+		if(!consume(')'))
+			error("開きカッコに対応する閉じカッコがありません: %s",tokens[pos].input);
+		return node;
+	}
+	if(tokens[pos].ty==TK_NUM)
+		return new_node_num(tokens[pos++].val);
+
+	error("数値でも開きカッコでもないトークンです： %s",tokens[pos].input);
+}
+
 
 // An error reporting function.
 void error(char *fmt, ...) {
