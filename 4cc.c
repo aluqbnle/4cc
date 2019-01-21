@@ -1,138 +1,167 @@
+#include <assert.h>
+#include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <string.h>
 
-//トークンの型を表す値
-enum{
-	TK_NUM=256,//整数トークン
-	TK_EOF,//入力の終わりを表すトークン
+// Tokenizer
+
+enum {
+  TK_NUM = 256, // Number literal
+  TK_EOF,       // End marker
 };
 
-//トークンの型
-typedef struct{
-	int ty;	//トークンの型
-	int val;	//tyがTK_NUMの場合、その数値
-	char *input;	//トークン文字列(エラーメッセージ用)
-}Token;
+// Token type
+typedef struct {
+  int ty;      // Token type
+  int val;     // Number literal
+  char *input; // Token string (for error reporting)
+} Token;
 
-// トークナイズした結果のトークン列はこの配列に保存する
-// 100個以上のトークンは来ないものとする
+// Tokenized input is stored to this array.
 Token tokens[100];
 
-// pが指している文字列をトークンを分割いてtokensに保存する
-void tokenize(char *p){
-	int i=0;
-	while (*p){
-		//空白文字をスキップ
-		if(isspace(*p)){
-			p++;
-			continue;
-		}
-		if(*p=='+'||*p=='-'){
-			tokens[i].ty=*p;
-			tokens[i].input=p;
-			i++;
-			p++;
-			continue;
-		}
-		if(isdigit(*p)){
-			tokens[i].ty=TK_NUM;
-			tokens[i].input=p;
-			tokens[i].val=strtol(p,&p,10);
-			i++;
-			continue;
-		}
+void tokenize(char *p) {
+  int i = 0;
+  while (*p) {
+    // Skip whitespace
+    if (isspace(*p)) {
+      p++;
+      continue;
+    }
 
-		fprintf(stderr,"トークナイズできません: %s\n",p);
-		exit(1);
-	}
-	tokens[i].ty=TK_EOF;
-	tokens[i].input=p;
+    // + or -
+    if (*p == '+' || *p == '-') {
+      tokens[i].ty = *p;
+      tokens[i].input = p;
+      i++;
+      p++;
+      continue;
+    }
+
+    // Number
+    if (isdigit(*p)) {
+      tokens[i].ty = TK_NUM;
+      tokens[i].input = p;
+      tokens[i].val = strtol(p, &p, 10);
+      i++;
+      continue;
+    }
+
+    fprintf(stderr, "cannot tokenize: %s", p);
+    exit(1);
+  }
+
+  tokens[i].ty = TK_EOF;
 }
 
-//エラーを報告するための関数
-void error(int i){
-	fprintf(stderr,"予期せぬトークンです: %s\n",tokens[i].input);
-	exit(1);
+// Recursive-descendent parser
+
+int pos = 0;
+
+enum {
+  ND_NUM = 256,     // Number literal
+};
+
+typedef struct Node {
+  int ty;           // Node type
+  struct Node *lhs; // left-hand side
+  struct Node *rhs; // right-hand side
+  int val;          // Number literal
+} Node;
+
+Node *new_node(int op, Node *lhs, Node *rhs) {
+  Node *node = malloc(sizeof(Node));
+  node->ty = op;
+  node->lhs = lhs;
+  node->rhs = rhs;
+  return node;
 }
 
-int main(int argc, char **argv)
-{
-	if (argc != 2)
-	{
-		fprintf(stderr, "引数の個数が正しくありません\n");
-		return 1;
-	}
+Node *new_node_num(int val) {
+  Node *node = malloc(sizeof(Node));
+  node->ty = ND_NUM;
+  node->val = val;
+  return node;
+}
 
-	//tokenizeする
-	tokenize(argv[1]);
+// An error reporting function.
+void error(char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  fprintf(stderr, "\n");
+  exit(1);
+}
 
-	//アセンブリの前半部分を出力
-	printf(".intel_syntax noprefix\n");
-	printf(".global main\n");
-	printf("main:\n");
+Node *number() {
+  if (tokens[pos].ty == TK_NUM)
+    return new_node_num(tokens[pos++].val);
+  error("number expected, but got %s", tokens[pos].input);
+}
 
-	//式の最初は数でなければならないので、それをチェックして
-	//最初のmov命令を出力
-	if(tokens[0].ty!=TK_NUM)
-		error(0);
-	printf("	mov rax, %d\n",tokens[0].val);
-	//`+ <数>`あるいは`-<数>`というトークンの並びを消費しつつ
-	//アセンブリを出力
-	int i=1;
-	while(tokens[i].ty!=TK_EOF){
-		if(tokens[i].ty=='+'){
-			i++;
-			if(tokens[i].ty!=TK_NUM)
-				error(i);
-			printf("	add rax %d\n",tokens[i].val);
-			i++;
-			continue;
-		}
+Node *expr() {
+  Node *lhs = number();
+  for (;;) {
+    int op = tokens[pos].ty;
+    if (op != '+' && op != '-')
+      break;
+    pos++;
+    lhs = new_node(op, lhs, number());
+  }
 
-		if(tokens[i].ty=='-'){
-			i++;
-			if(tokens[i].ty!=TK_NUM)
-				error(i);
-			printf("	sub rax, %d \n",tokens[i].val);
-			i++;
-			continue;
-		}
-		error(i);
-	}
+  if (tokens[pos].ty != TK_EOF)
+    error("stray token: %s", tokens[pos].input);
+  return lhs;
+}
 
-	printf("	ret\n");
-	return 0;
+// Code generator
 
+char *regs[] = {"rdi", "rsi", "r10", "r11", "r12", "r13", "r14", "r15", NULL};
+int cur;
 
-	// char *p = argv[1];
+char *gen(Node *node) {
+  if (node->ty == ND_NUM) {
+    char *reg = regs[cur++];
+    if (!reg)
+      error("register exhausted");
+    printf("  mov %s, %d\n", reg, node->val);
+    return reg;
+  }
 
-	// printf(".intel_syntax noprefix\n");
-	// printf(".global main\n");
-	// printf("main:\n");
-	// printf("  mov rax, %ld\n", strtol(p, &p, 10));
+  char *dst = gen(node->lhs);
+  char *src = gen(node->rhs);
 
-	// while (*p)
-	// {
-	// 	if (*p == '+')
-	// 	{
-	// 		p++;
-	// 		printf("  add rax, %ld\n", strtol(p, &p, 10));
-	// 		continue;
-	// 	}
+  switch (node->ty) {
+  case '+':
+    printf("  add %s, %s\n", dst, src);
+    return dst;
+  case '-':
+    printf("  sub %s, %s\n", dst, src);
+    return dst;
+  default:
+    assert(0 && "unknown operator");
+  }
+}
 
-	// 	if (*p == '-')
-	// 	{
-	// 		p++;
-	// 		printf("  sub rax, %ld\n", strtol(p, &p, 10));
-	// 		continue;
-	// 	}
+int main(int argc, char **argv) {
+  if (argc != 2) {
+    fprintf(stderr, "Usage: 9cc <code>\n");
+    return 1;
+  }
 
-	// 	fprintf(stderr, "予期せぬ文字です: '%c'\n", *p);
-	// 	return 1;
-	// }
+  // Tokenize and parse.
+  tokenize(argv[1]);
+  Node* node = expr();
 
-	// printf("  ret\n");
-	// return 0;
+  // Print the prologue.
+  printf(".intel_syntax noprefix\n");
+  printf(".global main\n");
+  printf("main:\n");
+
+  // Generate code while descending the parse tree.
+  printf("  mov rax, %s\n", gen(node));
+  printf("  ret\n");
+  return 0;
 }
