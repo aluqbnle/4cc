@@ -9,52 +9,53 @@
 // Tokenizer
 
 enum {
-  TK_NUM = 256, // Number literal
-  TK_EOF,       // End marker
+	TK_NUM = 256, // Number literal
+	TK_EOF,       // End marker
 };
 
 // Token type
 typedef struct {
-  int ty;      // Token type
-  int val;     // Number literal
-  char *input; // Token string (for error reporting)
+	int ty;      // Token type
+	int val;     // Number literal
+	char *input; // Token string (for error reporting)
 } Token;
 
 // Tokenized input is stored to this array.
 Token tokens[100];
 
+//pが指している文字列をトークンに分割してtokensに保存する
 void tokenize(char *p) {
-  int i = 0;
-  while (*p) {
-    // Skip whitespace
-    if (isspace(*p)) {
-      p++;
-      continue;
-    }
+	int i = 0;
+	while (*p) {
+		// Skip whitespace
+		if (isspace(*p)) {
+			p++;
+			continue;
+		}
 
-    // + or -
-    if (*p == '+' || *p == '-') {
-      tokens[i].ty = *p;
-      tokens[i].input = p;
-      i++;
-      p++;
-      continue;
-    }
+		// + or - or * or /
+		if (*p == '+' || *p == '-' ||*p=='*'||*p=='/'||*p=='('||*p==')') {
+			tokens[i].ty = *p;
+			tokens[i].input = p;
+			i++;
+			p++;
+			continue;
+		}
 
-    // Number
-    if (isdigit(*p)) {
-      tokens[i].ty = TK_NUM;
-      tokens[i].input = p;
-      tokens[i].val = strtol(p, &p, 10);
-      i++;
-      continue;
-    }
+		// Number
+		if (isdigit(*p)) {
+			tokens[i].ty = TK_NUM;
+			tokens[i].input = p;
+			tokens[i].val = strtol(p, &p, 10);
+			i++;
+			continue;
+		}
 
-    fprintf(stderr, "cannot tokenize: %s", p);
-    exit(1);
-  }
+		fprintf(stderr, "cannot tokenize: %s", p);
+		exit(1);
+	}
 
-  tokens[i].ty = TK_EOF;
+	tokens[i].ty = TK_EOF;
 }
 
 // Recursive-descendent parser
@@ -62,15 +63,16 @@ void tokenize(char *p) {
 int pos = 0;
 
 enum {
-  ND_NUM = 256,     // Number literal
+	ND_NUM = 256,     // Number literal
 };
 
 typedef struct Node {
-  int ty;           // Node type
-  struct Node *lhs; // left-hand side
-  struct Node *rhs; // right-hand side
-  int val;          // Number literal
+	int ty;           // Node type
+	struct Node *lhs; // left-hand side
+	struct Node *rhs; // right-hand side
+	int val;          // Number literal
 } Node;
+
 Node *mul();
 Node *term();
 void error(char *fmt, ...);
@@ -78,17 +80,17 @@ void error(char *fmt, ...);
 Node *new_node(int op, Node *lhs, Node *rhs)
 {
 	Node *node = malloc(sizeof(Node));
-  node->ty = op;
-  node->lhs = lhs;
-  node->rhs = rhs;
-  return node;
+	node->ty = op;
+	node->lhs = lhs;
+	node->rhs = rhs;
+	return node;
 }
 
 Node *new_node_num(int val) {
-  Node *node = malloc(sizeof(Node));
-  node->ty = ND_NUM;
-  node->val = val;
-  return node;
+	Node *node = malloc(sizeof(Node));
+	node->ty = ND_NUM;
+	node->val = val;
+	return node;
 }
 
 int consume(int ty){
@@ -112,7 +114,6 @@ Node *add(){
 
 Node *mul(){
 	Node *node =term();
-
 	for(;;){
 		if(consume('*'))
 			node = new_node('*',node,term());
@@ -138,32 +139,32 @@ Node *term(){
 
 // An error reporting function.
 void error(char *fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
-  fprintf(stderr, "\n");
-  exit(1);
+	va_list ap;
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	fprintf(stderr, "\n");
+	exit(1);
 }
 
 Node *number() {
-  if (tokens[pos].ty == TK_NUM)
-    return new_node_num(tokens[pos++].val);
-  error("number expected, but got %s", tokens[pos].input);
+	if (tokens[pos].ty == TK_NUM)
+		return new_node_num(tokens[pos++].val);
+	error("number expected, but got %s", tokens[pos].input);
 }
 
 Node *expr() {
-  Node *lhs = number();
-  for (;;) {
-    int op = tokens[pos].ty;
-    if (op != '+' && op != '-')
-      break;
-    pos++;
-    lhs = new_node(op, lhs, number());
-  }
+	Node *lhs = number();
+	for (;;) {
+		int op = tokens[pos].ty;
+		if (op != '+' && op != '-')
+			break;
+		pos++;
+		lhs = new_node(op, lhs, number());
+	}
 
-  if (tokens[pos].ty != TK_EOF)
-    error("stray token: %s", tokens[pos].input);
-  return lhs;
+	if (tokens[pos].ty != TK_EOF)
+		error("stray token: %s", tokens[pos].input);
+	return lhs;
 }
 
 // Code generator
@@ -171,47 +172,54 @@ Node *expr() {
 char *regs[] = {"rdi", "rsi", "r10", "r11", "r12", "r13", "r14", "r15", NULL};
 int cur;
 
-char *gen(Node *node) {
-  if (node->ty == ND_NUM) {
-    char *reg = regs[cur++];
-    if (!reg)
-      error("register exhausted");
-    printf("  mov %s, %d\n", reg, node->val);
-    return reg;
-  }
+void gen(Node *node) {
+	if (node->ty == ND_NUM) {
+		printf("	push %d\n",node->val);
+		return;
+	}
+	gen(node->lhs);
+	gen(node->rhs);
 
-  char *dst = gen(node->lhs);
-  char *src = gen(node->rhs);
+	printf("	pop rdi\n");
+	printf("	pop rax\n");
 
-  switch (node->ty) {
-  case '+':
-    printf("  add %s, %s\n", dst, src);
-    return dst;
-  case '-':
-    printf("  sub %s, %s\n", dst, src);
-    return dst;
-  default:
-    assert(0 && "unknown operator");
-  }
+	switch (node->ty) {
+	case '+':
+		printf("  add rax, rdi\n");
+		break;
+	case '-':
+		printf("  sub rax, rdi\n");
+		break;
+	case '*':
+		printf("	mul rdi\n");
+		break;
+	case '/':
+		printf("	mov rdx, 0\n");
+		printf("	div rdi\n");
+	}
+	printf("	push rax\n");
 }
 
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    fprintf(stderr, "Usage: 9cc <code>\n");
-    return 1;
-  }
+	if (argc != 2) {
+		fprintf(stderr, "引数の個数が正しくありません　\n");
+		return 1;
+	}
 
-  // Tokenize and parse.
-  tokenize(argv[1]);
-  Node* node = expr();
+	// Tokenize and parse.
+	tokenize(argv[1]);
+	Node* node = add();
 
-  // Print the prologue.
-  printf(".intel_syntax noprefix\n");
-  printf(".global main\n");
-  printf("main:\n");
+	// Print the prologue.
+	printf(".intel_syntax noprefix\n");
+	printf(".global main\n");
+	printf("main:\n");
 
-  // Generate code while descending the parse tree.
-  printf("  mov rax, %s\n", gen(node));
-  printf("  ret\n");
-  return 0;
+	//抽象僕を下りながらコード生成
+	gen(node);
+
+	// Generate code while descending the parse tree.
+	printf("  pop rax\n");
+	printf("  ret\n");
+	return 0;
 }
